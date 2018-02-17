@@ -1,0 +1,254 @@
+/*
+ * Copyright © 2017 Vincent Lachenal
+ * This work is free. You can redistribute it and/or modify it under the
+ * terms of the Do What The Fuck You Want To Public License, Version 2,
+ * as published by Sam Hocevar. See the COPYING file for more details.
+ */
+#include "thriftClientTestSuite.hpp"
+
+#include "dataset.hpp"
+
+#include "logger/loggerFactory.hpp"
+
+#include "StatsService.h"
+
+#include <thrift/protocol/TCompactProtocol.h>
+#include <thrift/protocol/TMultiplexedProtocol.h>
+#include <thrift/transport/TSocket.h>
+#include <thrift/transport/TTransportUtils.h>
+
+
+using apache::thrift::transport::TTransport;
+using apache::thrift::transport::TSocket;
+using apache::thrift::transport::TBufferedTransport;
+using apache::thrift::protocol::TProtocol;
+using apache::thrift::protocol::TCompactProtocol;
+using apache::thrift::protocol::TMultiplexedProtocol;
+
+
+const std::string THRIFT_PROTO("thrift");
+
+// Thrift client configuration +
+// Constructors +
+ThriftClientConfig::ThriftClientConfig(const std::string& hostname, uint16_t port) {
+  std::shared_ptr<TTransport> socket(new TSocket(hostname, port));
+  std::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+  std::shared_ptr<TProtocol> proto(new TCompactProtocol(transport));
+  _custProto = std::make_shared<TMultiplexedProtocol>(proto, "customer");
+  //_statsProto = std::make_shared<TMultiplexedProtocol>(proto, "stats");
+  transport->open();
+}
+
+ThriftClientConfig::ThriftClientConfig(const ThriftClientConfig& other): _custProto(other._custProto)/*, _statsProto(other._statsProto)*/ {
+  // Nothing to do
+}
+// Constructors -
+
+// Destructors +
+ThriftClientConfig::~ThriftClientConfig() {
+  // Nothing to do
+}
+// Destructors -
+// Thrift client configuration -
+
+// Thrift poolable client +
+// Constructors +
+PoolableCustomerServiceClient::PoolableCustomerServiceClient(const ThriftClientConfig& config):
+  CustomerServiceClient(config.getCustomerProto()), _valid(true) {
+  // Nothing to do
+}
+// Constructors -
+
+// Destructors +
+PoolableCustomerServiceClient::~PoolableCustomerServiceClient() {
+  // Nothing to do
+}
+// Destructors -
+// Thrift poolable client -
+
+const anch::logger::Logger& ThriftClientTestSuite::LOG = anch::logger::LoggerFactory::getLogger("thrift-client-test-suite");
+
+
+// Thrift client test suite +
+// Constructors +
+ThriftClientTestSuite::ThriftClientTestSuite(): ClientTestSuite<Customer,ClientCall>(), _host("localhost"), _port(9090), _pool(NULL) {
+  const anch::resource::Resource& res = anch::resource::Resource::getResource("application.conf");
+  bool found = res.getParameter(_host, "server.host", "client");
+  if(!found) {
+    LOG.warn("server.host is not deifined in application.conf. locahost will be used.");
+  }
+  std::string port;
+  found = res.getParameter(port, "server.port", "client");
+  if(!found) {
+    LOG.warn("server.port is not deifined in application.conf. 9090 will be used.");
+  } else {
+    try {
+      _port = std::stoul(port);
+    } catch(const std::invalid_argument& e) {
+      LOG.warn("server.port is not an integer: ", port, ". Keep using 9090.");
+    } catch(const std::out_of_range& e) {
+      LOG.warn("server.port is not an unsigned integer: ", port, ". Keep using 9090.");
+    }
+  }
+}
+// Constructors -
+
+
+// Destructor +
+ThriftClientTestSuite::~ThriftClientTestSuite() {
+  delete _pool;
+}
+// Destructor -
+
+
+// Methods +
+void
+ThriftClientTestSuite::deleteAll() {
+  auto client = _pool->borrowResource().get();
+  try {
+    client.deleteAll();
+  } catch(const CustomerException& e) {
+    LOG.error("Unable to remove all entries from database: ", e);
+  } catch(...) {
+    client.setValid(false);
+  }
+}
+
+void
+ThriftClientTestSuite::initializeTestSuite() {
+  _customers = _data.getData();
+  ThriftClientConfig config(_host, _port);
+  _pool = new CustomerClientPool(config, _nbThread, _nbThread);
+}
+
+ClientCall
+ThriftClientTestSuite::createCustomer(Customer& customer, int requestSeq) {
+  CreateRequest req;
+  req.customer = customer;
+  req.header.requestSeq = requestSeq;
+  req.header.mapper = Mapper::MANUAL;
+  ClientCall call;
+  call.protocol = THRIFT_PROTO;
+  call.method = "create";
+  call.requestSeq = requestSeq;
+  call.ok = false;
+  call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  auto client = _pool->borrowResource().get();
+  try {
+    client.create(customer.id, req);
+    call.ok = true;
+  } catch(const CustomerException& e) {
+    call.errMsg = e.what();
+  } catch(const std::exception& e) {
+    call.errMsg = e.what();
+    client.setValid(false);
+  } catch(...) {
+    call.errMsg = "Unexpected error";
+    client.setValid(false);
+  }
+  return call;
+}
+
+ClientCall
+ThriftClientTestSuite::listAll(uint32_t requestSeq) {
+  ListAllRequest req;
+  req.header.requestSeq = requestSeq;
+  req.header.mapper = Mapper::MANUAL;
+  ClientCall call;
+  call.protocol = THRIFT_PROTO;
+  call.method = "list";
+  call.requestSeq = requestSeq;
+  call.ok = false;
+  std::vector<Customer> customers;
+  call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  auto client = _pool->borrowResource().get();
+  try {
+    client.listCustomers(customers, req);
+    call.ok = true;
+  } catch(const CustomerException& e) {
+    call.errMsg = e.what();
+  } catch(...) {
+    call.errMsg = "Unexpected error";
+    client.setValid(false);
+  }
+  if(customers.empty()) {
+    call.ok = false;
+    call.errMsg = "Response is empty";
+  } else if(customers.size() != _customers.size()) {
+    LOG.warn("Customers size should be ", _customers.size(), " instead of ", customers.size());
+  }
+  return call;
+}
+
+ClientCall
+ThriftClientTestSuite::getDetails(const Customer& customer, int requestSeq) {
+  GetRequest req;
+  req.header.requestSeq = requestSeq;
+  req.header.mapper = Mapper::MANUAL;
+  ClientCall call;
+  call.protocol = THRIFT_PROTO;
+  call.method = "get";
+  call.requestSeq = requestSeq;
+  call.ok = false;
+  Customer cust;
+  call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  auto client = _pool->borrowResource().get();
+  try {
+    client.get(cust, req);
+    call.ok = true;
+  } catch(const CustomerException& e) {
+    call.errMsg = e.what();
+  } catch(...) {
+    call.errMsg = "Unexpected error";
+    client.setValid(false);
+  }
+  if(cust.id == "") {
+    call.ok = false;
+    call.errMsg = "Customer " + customer.id + " has not been found";
+  } else if(cust.id != customer.id) {
+    LOG.warn("Customer should have ", customer.id, " instead of ", cust.id);
+  }
+  return call;
+}
+
+void
+ThriftClientTestSuite::consolidateStats() {
+  TestSuite suite;
+  // Gather system informations +
+  suite.jvm = "7.4"; // \todo GCC version
+  suite.vendor = "GCC";
+  suite.osFamily = "Linux";
+  suite.osVersion = "4.14.15"; // \todo linux version
+  suite.cpu = _cpu;
+  suite.memory = _memory;
+  // Gather system informations -
+  // Gather test suite informations +
+  suite.nbThread = _nbThread;
+  suite.protocol = THRIFT_PROTO;
+  suite.compression = "none";
+  suite.comment = _comment;
+  suite.calls = _calls;
+  suite.mapper = Mapper::MANUAL;
+  // Gather test suite informations -
+
+  std::shared_ptr<TTransport> socket(new TSocket(_host, _port));
+  std::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
+  std::shared_ptr<TProtocol> proto(new TCompactProtocol(transport));
+  std::shared_ptr<TProtocol> statProto(new TMultiplexedProtocol(proto, "stats"));
+  StatsServiceClient client(statProto);
+  try {
+    client.consolidate(suite);
+    client.purge();
+  } catch(const StatsException& e) {
+    LOG.error("Unable to consolidate statistics: ", e);
+  } catch(...) {
+    LOG.error("Unexpected error");
+  }
+}
+
+const anch::logger::Logger&
+ThriftClientTestSuite::logger() const {
+  return LOG;
+}
+// Methods -
+// Thrift client test suite -
