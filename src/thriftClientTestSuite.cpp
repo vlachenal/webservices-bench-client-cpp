@@ -26,7 +26,7 @@ using apache::thrift::protocol::TCompactProtocol;
 using apache::thrift::protocol::TMultiplexedProtocol;
 
 
-const std::string THRIFT_PROTO("thrift");
+const std::string THRIFT_PROTO("thrift-cpp");
 
 // Thrift client configuration +
 // Constructors +
@@ -139,7 +139,7 @@ ThriftClientTestSuite::createCustomer(Customer& customer, int requestSeq) {
   call.method = "create";
   call.requestSeq = requestSeq;
   call.ok = false;
-  call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  call.clientStart = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   auto res = _pool->borrowResource(); // keep resource reference not to release it immediately
   PoolableServiceClient& client = res.get();
   try {
@@ -156,7 +156,7 @@ ThriftClientTestSuite::createCustomer(Customer& customer, int requestSeq) {
     client.setValid(false);
     LOG.error("Unexpected error");
   }
-  call.clientEnd = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  call.clientEnd = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   return call;
 }
 
@@ -171,7 +171,7 @@ ThriftClientTestSuite::listAll(uint32_t requestSeq) {
   call.requestSeq = requestSeq;
   call.ok = false;
   std::vector<Customer> customers;
-  call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  call.clientStart = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   auto res = _pool->borrowResource(); // keep resource reference not to release it immediately
   PoolableServiceClient& client = res.get();
   try {
@@ -188,7 +188,7 @@ ThriftClientTestSuite::listAll(uint32_t requestSeq) {
     client.setValid(false);
     LOG.error("Unexpected error");
   }
-  call.clientEnd = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  call.clientEnd = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   if(customers.empty()) {
     call.ok = false;
     call.errMsg = "Response is empty";
@@ -210,7 +210,7 @@ ThriftClientTestSuite::getDetails(const Customer& customer, int requestSeq) {
   call.requestSeq = requestSeq;
   call.ok = false;
   Customer cust;
-  call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  call.clientStart = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   auto res = _pool->borrowResource(); // keep resource reference not to release it immediately
   PoolableServiceClient& client = res.get();
   try {
@@ -227,7 +227,7 @@ ThriftClientTestSuite::getDetails(const Customer& customer, int requestSeq) {
     client.setValid(false);
     LOG.error("Unexpected error");
   }
-  call.clientEnd = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
+  call.clientEnd = std::chrono::duration_cast<std::chrono::nanoseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   if(cust.id == "") {
     call.ok = false;
     call.errMsg = "Customer " + customer.id + " has not been found";
