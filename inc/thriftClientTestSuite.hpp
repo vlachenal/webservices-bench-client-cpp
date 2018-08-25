@@ -14,6 +14,7 @@
 
 #include "customer_types.h"
 #include "CustomerService.h"
+#include "StatsService.h"
 
 #include <thrift/protocol/TProtocol.h>
 
@@ -29,11 +30,11 @@ class ThriftClientConfig {
 
   // Attributes +
 private:
-  /*! Customer service protocol */
-  std::shared_ptr<apache::thrift::protocol::TProtocol> _custProto;
+  /*! Server hostname */
+  std::string _hostname;
 
-  ///*! Statistics protocol */
-  //std::shared_ptr<TProtocol> _statsProto;
+  /*! Server port */
+  uint16_t _port;
   // Attributes -
 
   // Constructors +
@@ -65,12 +66,21 @@ public:
   // Accessors +
 public:
   /*!
-   * Customer protocol getter
+   * Server hostname getter
    *
-   * \return protocol
+   * \return the hostname
    */
-  inline std::shared_ptr<apache::thrift::protocol::TProtocol> getCustomerProto() const {
-    return _custProto;
+  inline const std::string& getHostname() const {
+    return _hostname;
+  }
+
+  /*!
+   * Server port getter
+   *
+   * \return the server port
+   */
+  inline uint16_t getPort() const {
+    return _port;
   }
   // Accessors -
 
@@ -84,38 +94,75 @@ public:
  *
  * \author Vincent Lachenal
  */
-class PoolableCustomerServiceClient: public CustomerServiceClient {
+class PoolableServiceClient {
 
   // Attributes +
 private:
-  /*! Valiidity state */
+  /*! Thrift transport */
+  std::shared_ptr<apache::thrift::transport::TTransport> _transport;
+
+  /*! Customer service */
+  CustomerServiceClient* _custService;
+
+  /*! Statistics service */
+  StatsServiceClient* _statsService;
+
+  /*! Validity state */
   bool _valid;
   // Attributes -
 
   // Constructors +
 public:
   /*!
-   * \ref PoolableCustomerClient constructor
+   * \ref PoolableServiceClient constructor
    *
    * \param config the client configuration
    */
-  PoolableCustomerServiceClient(const ThriftClientConfig& config);
+  PoolableServiceClient(const ThriftClientConfig& config);
   // Constructors -
 
   // Destructor +
 public:
   /*!
-   * \ref PoolableCustomerClient destructor
+   * \ref PoolableServiceClient destructor
    */
-  virtual ~PoolableCustomerServiceClient();
+  virtual ~PoolableServiceClient();
   // Destructor -
 
   // Accessors +
 public:
+  /*!
+   * Access to customer service reference
+   *
+   * \return the customer service
+   */
+  inline CustomerServiceClient& customer() {
+    return *_custService;
+  }
+
+  /*!
+   * Access to statistics service reference
+   *
+   * \return the statistics service
+   */
+  inline StatsServiceClient& stats() {
+    return *_statsService;
+  }
+
+  /*!
+   * Set validity flag
+   *
+   * \param valid the flag to set
+   */
   inline void setValid(bool valid) {
     _valid = valid;
   }
 
+  /*!
+   * Validity flag getter
+   *
+   * \return \c true if connection is valid, \c false otherwise
+   */
   inline bool isValid() {
     return _valid;
   }
@@ -124,7 +171,7 @@ public:
 };
 
 /*! Client pool definition */
-using CustomerClientPool = anch::ResourcePool<PoolableCustomerServiceClient,ThriftClientConfig>;
+using CustomerClientPool = anch::ResourcePool<PoolableServiceClient,ThriftClientConfig>;
 
 
 /*!

@@ -150,16 +150,16 @@ public:
     {
       logger().info("Customers creation");
       std::atomic_uint seq(1);
-      anch::ThreadPool threadPool(_nbThread);
+      anch::ThreadPool pool(_nbThread);
       for(T& customer : _customers) {
-	threadPool.add([&seq, this](T& cust) {
-	    C call = this->createCustomer(cust, seq.fetch_add(1));
-	    std::lock_guard<std::mutex> lock(this->_mutex);
-	    this->_calls.push_back(call);
-	  }, customer);
+	pool.add([&seq, this](T& cust) {
+		   C call = this->createCustomer(cust, seq.fetch_add(1));
+		   std::lock_guard<std::mutex> lock(this->_mutex);
+		   this->_calls.push_back(call);
+		 }, std::ref(customer));
       }
-      threadPool.start();
-      threadPool.awaitTermination(std::chrono::seconds(-1));
+      pool.start();
+      pool.awaitTermination(std::chrono::seconds(-1));
     }
     // Customer creations -
 
@@ -167,17 +167,16 @@ public:
     {
       logger().info("List all");
       std::atomic_uint seq(1);
-      anch::ThreadPool threadPool(_nbThread);
+      anch::ThreadPool pool(_nbThread);
       for(std::size_t i = 0 ; i < _customers.size() ; ++i) {
-	threadPool.add([&seq, this]() {
-	    C call = this->listAll(seq.fetch_add(1));
-	    std::lock_guard<std::mutex> lock(this->_mutex);
-	    this->_calls.push_back(call);
-	  }
-	  );
+	pool.add([&seq, this]() {
+		   C call = this->listAll(seq.fetch_add(1));
+		   std::lock_guard<std::mutex> lock(this->_mutex);
+		   this->_calls.push_back(call);
+		 });
       }
-      threadPool.start();
-      threadPool.awaitTermination(std::chrono::seconds(-1));
+      pool.start();
+      pool.awaitTermination(std::chrono::seconds(-1));
     }
     // List all -
 
@@ -185,16 +184,16 @@ public:
     {
       logger().info("Get details");
       std::atomic_uint seq(1);
-      anch::ThreadPool threadPool(_nbThread);
+      anch::ThreadPool pool(_nbThread);
       for(const T& customer : _customers) {
-	threadPool.add([&seq, this](const T& cust) {
-	    C call = this->getDetails(cust, seq.fetch_add(1));
-	    std::lock_guard<std::mutex> lock(this->_mutex);
-	    this->_calls.push_back(call);
-	  }, customer);
+	pool.add([&seq, this](const T& cust) {
+		   C call = this->getDetails(cust, seq.fetch_add(1));
+		   std::lock_guard<std::mutex> lock(this->_mutex);
+		   this->_calls.push_back(call);
+		 }, std::ref(customer));
       }
-      threadPool.start();
-      threadPool.awaitTermination(std::chrono::seconds(-1));
+      pool.start();
+      pool.awaitTermination(std::chrono::seconds(-1));
     }
     // Get details -
 

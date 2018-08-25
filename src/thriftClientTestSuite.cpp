@@ -30,16 +30,11 @@ const std::string THRIFT_PROTO("thrift");
 
 // Thrift client configuration +
 // Constructors +
-ThriftClientConfig::ThriftClientConfig(const std::string& hostname, uint16_t port) {
-  std::shared_ptr<TTransport> socket(new TSocket(hostname, port));
-  std::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
-  std::shared_ptr<TProtocol> proto(new TCompactProtocol(transport));
-  _custProto = std::make_shared<TMultiplexedProtocol>(proto, "customer");
-  //_statsProto = std::make_shared<TMultiplexedProtocol>(proto, "stats");
-  transport->open();
+ThriftClientConfig::ThriftClientConfig(const std::string& hostname, uint16_t port): _hostname(hostname), _port(port) {
+  // Nothing to do
 }
 
-ThriftClientConfig::ThriftClientConfig(const ThriftClientConfig& other): _custProto(other._custProto)/*, _statsProto(other._statsProto)*/ {
+ThriftClientConfig::ThriftClientConfig(const ThriftClientConfig& other): _hostname(other._hostname), _port(other._port) {
   // Nothing to do
 }
 // Constructors -
@@ -53,15 +48,22 @@ ThriftClientConfig::~ThriftClientConfig() {
 
 // Thrift poolable client +
 // Constructors +
-PoolableCustomerServiceClient::PoolableCustomerServiceClient(const ThriftClientConfig& config):
-  CustomerServiceClient(config.getCustomerProto()), _valid(true) {
-  // Nothing to do
+PoolableServiceClient::PoolableServiceClient(const ThriftClientConfig& config) {
+  std::shared_ptr<TTransport> socket(new TSocket(config.getHostname(), config.getPort()));
+  _transport = std::shared_ptr<TTransport>(new TBufferedTransport(socket));
+  std::shared_ptr<TProtocol> proto(new TCompactProtocol(_transport));
+  _custService = new CustomerServiceClient(std::make_shared<TMultiplexedProtocol>(proto, "customer"));
+  _statsService = new StatsServiceClient(std::make_shared<TMultiplexedProtocol>(proto, "stats"));
+  _transport->open();
+  _valid = true;
 }
 // Constructors -
 
 // Destructors +
-PoolableCustomerServiceClient::~PoolableCustomerServiceClient() {
-  // Nothing to do
+PoolableServiceClient::~PoolableServiceClient() {
+  delete _statsService;
+  delete _custService;
+  _transport->close();
 }
 // Destructors -
 // Thrift poolable client -
@@ -104,13 +106,18 @@ ThriftClientTestSuite::~ThriftClientTestSuite() {
 // Methods +
 void
 ThriftClientTestSuite::deleteAll() {
-  auto client = _pool->borrowResource().get();
+  auto res = _pool->borrowResource();
+  PoolableServiceClient& client = res.get();
   try {
-    client.deleteAll();
+    client.customer().deleteAll();
   } catch(const CustomerException& e) {
     LOG.error("Unable to remove all entries from database: ", e);
+  } catch(const std::exception& e) {
+    client.setValid(false);
+    LOG.error("Error while customer.deleteAll: ", e.what());
   } catch(...) {
     client.setValid(false);
+    LOG.error("Unexpected error");
   }
 }
 
@@ -133,19 +140,23 @@ ThriftClientTestSuite::createCustomer(Customer& customer, int requestSeq) {
   call.requestSeq = requestSeq;
   call.ok = false;
   call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-  auto client = _pool->borrowResource().get();
+  auto res = _pool->borrowResource(); // keep resource reference not to release it immediately
+  PoolableServiceClient& client = res.get();
   try {
-    client.create(customer.id, req);
+    client.customer().create(customer.id, req);
     call.ok = true;
   } catch(const CustomerException& e) {
     call.errMsg = e.what();
   } catch(const std::exception& e) {
     call.errMsg = e.what();
     client.setValid(false);
+    LOG.error("Error while customer.createCustomer: ", e.what());
   } catch(...) {
     call.errMsg = "Unexpected error";
     client.setValid(false);
+    LOG.error("Unexpected error");
   }
+  call.clientEnd = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   return call;
 }
 
@@ -161,16 +172,23 @@ ThriftClientTestSuite::listAll(uint32_t requestSeq) {
   call.ok = false;
   std::vector<Customer> customers;
   call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-  auto client = _pool->borrowResource().get();
+  auto res = _pool->borrowResource(); // keep resource reference not to release it immediately
+  PoolableServiceClient& client = res.get();
   try {
-    client.listCustomers(customers, req);
+    client.customer().listCustomers(customers, req);
     call.ok = true;
   } catch(const CustomerException& e) {
     call.errMsg = e.what();
+  } catch(const std::exception& e) {
+    call.errMsg = e.what();
+    client.setValid(false);
+    LOG.error("Error while customer.listAll: ", e.what());
   } catch(...) {
     call.errMsg = "Unexpected error";
     client.setValid(false);
+    LOG.error("Unexpected error");
   }
+  call.clientEnd = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   if(customers.empty()) {
     call.ok = false;
     call.errMsg = "Response is empty";
@@ -185,6 +203,7 @@ ThriftClientTestSuite::getDetails(const Customer& customer, int requestSeq) {
   GetRequest req;
   req.header.requestSeq = requestSeq;
   req.header.mapper = Mapper::MANUAL;
+  req.id = customer.id;
   ClientCall call;
   call.protocol = THRIFT_PROTO;
   call.method = "get";
@@ -192,16 +211,23 @@ ThriftClientTestSuite::getDetails(const Customer& customer, int requestSeq) {
   call.ok = false;
   Customer cust;
   call.clientStart = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
-  auto client = _pool->borrowResource().get();
+  auto res = _pool->borrowResource(); // keep resource reference not to release it immediately
+  PoolableServiceClient& client = res.get();
   try {
-    client.get(cust, req);
+    client.customer().get(cust, req);
     call.ok = true;
   } catch(const CustomerException& e) {
     call.errMsg = e.what();
+  } catch(const std::exception& e) {
+    call.errMsg = e.what();
+    client.setValid(false);
+    LOG.error("Error while customer.getDetails: ", e.what());
   } catch(...) {
     call.errMsg = "Unexpected error";
     client.setValid(false);
+    LOG.error("Unexpected error");
   }
+  call.clientEnd = std::chrono::duration_cast<std::chrono::milliseconds>(std::chrono::system_clock::now().time_since_epoch()).count();
   if(cust.id == "") {
     call.ok = false;
     call.errMsg = "Customer " + customer.id + " has not been found";
@@ -213,12 +239,18 @@ ThriftClientTestSuite::getDetails(const Customer& customer, int requestSeq) {
 
 void
 ThriftClientTestSuite::consolidateStats() {
+  for(ClientCall call: _calls) {
+    if(!call.ok) {
+      LOG.error("Found error in calls: ", call.errMsg);
+    }
+  }
+
   TestSuite suite;
   // Gather system informations +
-  suite.jvm = "7.4"; // \todo GCC version
-  suite.vendor = "GCC";
+  suite.jvm = "8.2"; // \todo GCC version
+  suite.vendor = "GNU GCC";
   suite.osFamily = "Linux";
-  suite.osVersion = "4.14.15"; // \todo linux version
+  suite.osVersion = "4.18.4"; // \todo linux version
   suite.cpu = _cpu;
   suite.memory = _memory;
   // Gather system informations -
@@ -231,16 +263,15 @@ ThriftClientTestSuite::consolidateStats() {
   suite.mapper = Mapper::MANUAL;
   // Gather test suite informations -
 
-  std::shared_ptr<TTransport> socket(new TSocket(_host, _port));
-  std::shared_ptr<TTransport> transport(new TBufferedTransport(socket));
-  std::shared_ptr<TProtocol> proto(new TCompactProtocol(transport));
-  std::shared_ptr<TProtocol> statProto(new TMultiplexedProtocol(proto, "stats"));
-  StatsServiceClient client(statProto);
+  auto res = _pool->borrowResource(); // keep resource reference not to release it immediately
+  PoolableServiceClient& client = res.get();
   try {
-    client.consolidate(suite);
-    client.purge();
+    client.stats().consolidate(suite);
+    client.stats().purge();
   } catch(const StatsException& e) {
     LOG.error("Unable to consolidate statistics: ", e);
+  } catch(const std::exception& e) {
+    LOG.error("Unexpected error: ", e.what());
   } catch(...) {
     LOG.error("Unexpected error");
   }
