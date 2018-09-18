@@ -59,13 +59,13 @@ file(
 
 # Executable
 add_executable(
-  webservices-bench-cpp
+  webservices-bench-client-cpp
   ${source_files}
   )
 
 set(CMAKE_MODULE_PATH "$ENV{HOME}/projects/webservices-bench-cpp/;${CMAKE_MODULE_PATH}")
 target_link_libraries(
-  webservices-bench-cpp
+  webservices-bench-client-cpp
   anch-logger
   anch-date
   anch-resource
